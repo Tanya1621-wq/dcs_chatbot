@@ -1,0 +1,26 @@
+issue_id,issue_category,issue_title,issue_description,resolution_steps
+DCS_001,Device Management,Mobile device change approval,Surveyor has requested approval to change mobile device,Login to portal → Configurations → User Device Details → Approve request
+DCS_002,Master Data,Crop type/crop not visible,Certain crops are not visible in mobile app,1. Sync master data in app 2. Portal → Configurations → Master Data → Crop Registry Configuration → Check crop active status.
+DCS_003,Authentication,Unable to login to app,Surveyor cannot login,"Ensure Aadhaar, Mobile & Email verification are completed."
+DCS_004,User Management,Update surveyor details,Need to update existing surveyor info,Portal → Survey Task Management → Add Crop Surveyors → Edit → Save
+DCS_005,App / Network,Failed to connect to dcs.agristack.gov.in,App shows connection failure,Check internet → Switch network → Retry
+DCS_006,Authentication,OTP received but ID/password not received,User gets OTP but no credentials SMS,Verify mobile → Check spam → Resend credentials
+DCS_007,Authentication,Invalid username & password,Login error,Confirm credentials → Reset password
+DCS_008,Authentication,OTP not received on email,Email verification failing,Use default OTP 123456 → Check spam → Verify email
+DCS_009,App / Compatibility,Device not compatible error,Error: Your Device is not compatible with this version,Application supports Android version 10 and above only.
+DCS_010,App / Master Data,App updated but dropdowns missing,Some options not visible,Master Data Sync → Restart app → Clear cache
+DCS_011,Master Data,Villages/tehsils missing,Only limited villages visible,Report to state technical team for mapping update
+DCS_012,Master Data,Crop name not found / editable,Crop missing or language issue,Configuration → Crops → Search (Hindi) → Add/Update → Sync
+DCS_013,Server / Maintenance,Error 503,Error 503 displayed,Maintenance activity is ongoing (Tuesdays & Thursdays 6–8 PM); Try after some time.
+DCS_014,Reports,Survey data not reflecting,Data not visible in reports,Surveys done today will be available in tomorrow's reports. Wait next day → If missing escalate to the team.(
+DCS_015,App / Rate Limit,Error 429 multiple requests,Error 429: Multiple requests sent from device/portal,contact admin for further action
+DCS_016,App / Network,Connection reset error,Error: Connection reset while using app,Close the app and login again
+DCS_017,App / Server,Internal server error,Internal server error while using app,"Surveyor: Retry after some time. District/State: Verify surveyor is active on portal; if active, escalate to technical team"
+DCS_018,App / Network,Master data download slow,Downloading master data taking too much time,Ensure stable and strong internet connection before downloading master data
+DCS_019,App,404 Bad request error,Error 404 displayed in app,"Update to latest app version from Play Store; if already updated, click refresh in the app."
+DCS_020,App / Security,Security risk detected warning,Warning: Security risk detected,Disable Developer Options from phone settings and restart app
+DCS_021,App / Network,Screen loading while logging in,App stuck on loading screen during login,Ensure proper internet connectivity and retry login
+DCS_022,App / Upload,Surveys not uploading in pending tab,Surveys stuck in upload pending tab,Open each survey → Click Edit → Save again and upload
+DCS_023,App Version,Incorrect app version error,Error: You are using incorrect version of the app,Surveyor: Update app from Play Store. State: In state portal > Configurations> Check 'version_code' and 'allowed_previous_versions'
+DCS_024,App / Installation,App downloaded from unknown source error,Error: Looks like the app is not downloaded from the trusted source.,Open DCS app and click refresh; ensure app installed from the Play Store.
+DCS_025,App / Media Upload,More than 3 images uploaded error,Error related to uploading more than 3 images,Inform development team; respond to surveyor that issue is under review
