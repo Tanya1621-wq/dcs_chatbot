@@ -71,22 +71,7 @@ def render() -> None:
 def _render_sidebar(searcher) -> None:
     with st.sidebar:
         st.title("DCS Support Bot")
-        st.caption("Hindi · Hinglish · English")
-
-        last = kb_service.get_last_updated()
-        st.markdown(
-            f"**KB entries:** {kb_service.kb_count()}  \n"
-            f"**Last updated:** {last or '—'}"
-        )
-        st.markdown(
-            "**Confidence threshold:** "
-            f"{CONFIDENCE_THRESHOLD:.2f}  \n"
-            "Below this, the assistant asks Groq for a fallback reply."
-        )
-        st.markdown(
-            "**Groq fallback:** "
-            + ("✅ enabled" if groq_service.is_available() else "⚠️ offline (no API key)")
-        )
+        # st.caption("Hindi · Hinglish · English")
 
         if st.button("Clear chat"):
             st.session_state.messages = []
@@ -94,8 +79,10 @@ def _render_sidebar(searcher) -> None:
 
         st.divider()
         _render_admin(searcher)
-        st.divider()
-        _render_feedback_summary()
+
+        if st.session_state.get("is_admin"):
+            st.divider()
+            _render_feedback_summary()
 
 
 def _render_admin(searcher) -> None:
@@ -119,6 +106,24 @@ def _render_admin(searcher) -> None:
         return
 
     st.success("Admin mode")
+
+    last = kb_service.get_last_updated()
+    st.markdown(
+        f"**KB entries:** {kb_service.kb_count()}  \n"
+        f"**Last updated:** {last or '—'}"
+    )
+    st.markdown(
+        "**Confidence threshold:** "
+        f"{CONFIDENCE_THRESHOLD:.2f}  \n"
+        "Below this, the assistant asks Groq for a fallback reply."
+    )
+    st.markdown(
+        "**Groq fallback:** "
+        + ("✅ enabled" if groq_service.is_available() else "⚠️ offline (no API key)")
+    )
+
+    st.divider()
+
     upload = st.file_uploader(
         "Upload knowledge base (.xlsx or .csv)",
         type=["xlsx", "csv"],
@@ -148,6 +153,29 @@ def _render_admin(searcher) -> None:
         else:
             st.error("Could not rebuild the index — is the KB empty?")
 
+    if st.button("Generate query paraphrases"):
+        pending = kb_service.entries_missing_paraphrases()
+        if not pending:
+            st.info("All entries already have paraphrases.")
+        elif not groq_service.is_available():
+            st.error("Groq API key is required for paraphrase generation.")
+        else:
+            progress = st.progress(0.0, text="Generating paraphrases…")
+            generated = 0
+            for i, entry in enumerate(pending):
+                paraphrases = groq_service.generate_paraphrases(entry)
+                if paraphrases:
+                    kb_service.set_paraphrases(entry.row_id, paraphrases)
+                    generated += 1
+                progress.progress(
+                    (i + 1) / len(pending),
+                    text=f"{i + 1}/{len(pending)} done",
+                )
+            st.success(f"Generated paraphrases for {generated} of {len(pending)} entries.")
+            if searcher.rebuild():
+                st.success("Index rebuilt with paraphrases.")
+            st.rerun()
+
     if st.button("Lock admin"):
         st.session_state.is_admin = False
         st.rerun()
@@ -167,12 +195,8 @@ def _render_feedback_summary() -> None:
 
 
 def _render_chat(searcher) -> None:
-    st.title("How can I help with DCS today?")
-    st.caption(
-        "Aap Hindi, Hinglish ya English mein likh sakte hain. "
-        "Examples: 'app nahi chal raha', 'fallow land option nahi aa raha', "
-        "'error 503 aa raha hai'."
-    )
+    st.title("How may I help you?")
+    
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -190,7 +214,7 @@ def _render_chat(searcher) -> None:
                 if msg.get("query_log_id"):
                     _render_feedback_buttons(msg["query_log_id"], msg["id"])
 
-    prompt = st.chat_input("Apna issue likhein…")
+    prompt = st.chat_input("Write your issue here..")
     if not prompt:
         return
 
@@ -201,7 +225,10 @@ def _render_chat(searcher) -> None:
 
     with st.chat_message("assistant"):
         with st.spinner("Searching knowledge base…"):
-            results = searcher.search(prompt)
+            search_query = groq_service.rewrite_query(prompt)
+            if search_query != prompt:
+                log.info("Rewrote query: %r → %r", prompt, search_query)
+            results = searcher.search(search_query)
             low_conf = searcher.is_low_confidence(results)
 
         if not low_conf:

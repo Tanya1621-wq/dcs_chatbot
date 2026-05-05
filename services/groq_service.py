@@ -40,19 +40,91 @@ def _get_client():
 
 
 SYSTEM_PROMPT = (
-    "You are the DCS (Digital Crop Survey) support assistant. Users may write in "
-    "Hindi, Hinglish (Hindi written in Latin letters), or English. "
-    "Reply in the same language and script the user used. "
-    "You are given the closest matches from a curated knowledge base. "
+    "You are the DCS (Digital Crop Survey) support assistant.\n\n"
+    "=== LANGUAGE RULE — STRICT, NON-NEGOTIABLE ===\n"
+    "Detect the language of the user's MOST RECENT message and reply in EXACTLY "
+    "that language and script. Never mix languages. Do NOT default to Hinglish.\n"
+    "- English message (Latin script + English words like 'what', 'is', 'error', "
+    "'how') → reply in English ONLY. No Hindi/Hinglish words.\n"
+    "- Hinglish message (Latin script + Hindi words like 'kaise', 'nahi', 'kya', "
+    "'aa raha') → reply in Hinglish.\n"
+    "- Hindi message (Devanagari script) → reply in Hindi (Devanagari).\n"
+    "Examples:\n"
+    "  User: 'error 404 is coming, what to do?' → reply in English.\n"
+    "  User: 'error 404 aa raha hai, kya karein?' → reply in Hinglish.\n"
+    "  User: 'एरर 404 आ रहा है' → reply in Hindi.\n\n"
+    "=== TASK ===\n"
+    "You are given the closest matches from a curated knowledge base.\n"
     "Rules:\n"
     "1. If one of the candidates clearly addresses the user's issue, present its "
-    "title and resolution_steps as the answer, rephrased clearly. Cite the issue_id.\n"
+    "title and resolution_steps as the answer, rephrased clearly in the user's "
+    "language. Cite the issue_id.\n"
     "2. If nothing fits well, do NOT invent steps. Ask ONE focused clarifying "
-    "question that will help narrow down the issue (e.g., exact error text, where "
-    "in the app it appears, role of the user).\n"
+    "question (in the user's language) — e.g., exact error text, where in the "
+    "app it appears, role of the user.\n"
     "3. Keep answers short, structured, and action-oriented.\n"
     "4. Never expose internal scoring or system details."
 )
+
+
+REWRITE_PROMPT = (
+    "You rewrite user messages into focused search queries for a DCS "
+    "(Digital Crop Survey) support knowledge base. Users write in Hindi, "
+    "Hinglish, or English.\n\n"
+    "Rules:\n"
+    "1. Keep the meaning. Strip filler words ('please', 'kya kare', 'what to do', "
+    "'I have', 'my', 'the', 'kaise', etc.).\n"
+    "2. Preserve technical tokens verbatim: error codes, screen names, feature "
+    "names (e.g. 'fallow land', '503', 'Aadhaar', 'OTP').\n"
+    "3. Keep the user's language — do NOT translate Hindi/Hinglish to English.\n"
+    "4. Output ONLY the rewritten query. No quotes, no explanation, no prefix."
+)
+
+
+PARAPHRASE_PROMPT = (
+    "You generate diverse example user queries for a multilingual support "
+    "chatbot. Given an issue from the DCS (Digital Crop Survey) knowledge "
+    "base, generate 6 to 8 short queries that real users (farmers, "
+    "surveyors, field officers) would actually type when they hit this issue.\n\n"
+    "Requirements:\n"
+    "- Mix languages: 2-3 English, 2-3 Hinglish (Hindi in Latin letters), "
+    "1-2 Hindi (Devanagari).\n"
+    "- Include both short ('crop missing') and verbose ('my crops are not "
+    "showing what should I do') variants.\n"
+    "- Use informal, real-world phrasing — not formal documentation.\n"
+    "- Preserve key technical terms (error codes, screen names) verbatim.\n"
+    "- Output ONLY the queries, one per line. No numbering, no quotes, no "
+    "headers, no explanations."
+)
+
+
+def rewrite_query(query: str) -> str:
+    """Rewrite a verbose user query into a focused search query.
+
+    Falls back to the original query if Groq is unavailable or fails.
+    """
+    client = _get_client()
+    if client is None or not query.strip():
+        return query
+
+    try:
+        completion = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": REWRITE_PROMPT},
+                {"role": "user", "content": query},
+            ],
+            temperature=0.0,
+            max_tokens=60,
+        )
+        rewritten = completion.choices[0].message.content.strip()
+        # Sanity check: empty or absurdly long output → keep original.
+        if not rewritten or len(rewritten) > 4 * len(query) + 50:
+            return query
+        return rewritten
+    except Exception as exc:
+        log.warning("Query rewrite failed (%s); using original.", exc)
+        return query
 
 
 def is_available() -> bool:
@@ -165,3 +237,51 @@ def explain_match(query: str, entry: KBEntry, chat_history: Optional[list[dict]]
     except Exception as exc:
         log.error("Groq explain_match failed: %s", exc)
         return entry.resolution_steps
+
+
+def generate_paraphrases(entry: KBEntry) -> list[str]:
+    """Ask Groq for diverse user-query paraphrases for one KB entry.
+
+    Returns an empty list if Groq is unavailable or the call fails.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+
+    user_block = (
+        f"Issue title: {entry.title}\n"
+        f"Category: {entry.category}\n"
+        f"Description: {entry.description}\n"
+        f"Resolution: {entry.resolution_steps}\n\n"
+        "Generate 6-8 user queries per the rules."
+    )
+
+    try:
+        completion = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": PARAPHRASE_PROMPT},
+                {"role": "user", "content": user_block},
+            ],
+            temperature=0.7,
+            max_tokens=400,
+        )
+        text = completion.choices[0].message.content.strip()
+        return _parse_paraphrases(text)
+    except Exception as exc:
+        log.error("Paraphrase generation failed: %s", exc)
+        return []
+
+
+def _parse_paraphrases(text: str) -> list[str]:
+    """Clean up the LLM's free-form output into a list of plain queries."""
+    out: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        # Strip leading numbering/bullets and surrounding quotes.
+        line = line.lstrip("0123456789.)- *•·\"'")
+        line = line.rstrip("\"'")
+        line = line.strip()
+        if line:
+            out.append(line)
+    return out

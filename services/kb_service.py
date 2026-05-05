@@ -1,10 +1,11 @@
 """Knowledge-base ingestion + SQLite persistence + query/feedback logs."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -31,10 +32,13 @@ class KBEntry:
     category: str
     description: str
     resolution_steps: str
+    paraphrases: list[str] = field(default_factory=list)
 
     def search_text(self) -> str:
-        # Title + category + description give best multilingual recall.
-        parts = [self.title, self.category, self.description]
+        # Indexing the resolution + LLM-generated paraphrases boosts recall
+        # on verbose / multilingual queries.
+        parts = [self.title, self.category, self.description, self.resolution_steps]
+        parts.extend(self.paraphrases)
         return " | ".join(p for p in parts if p)
 
 
@@ -45,7 +49,8 @@ CREATE TABLE IF NOT EXISTS kb_entries (
     title               TEXT NOT NULL,
     category            TEXT,
     description         TEXT,
-    resolution_steps    TEXT NOT NULL
+    resolution_steps    TEXT NOT NULL,
+    paraphrases         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -86,6 +91,11 @@ def _conn():
 def init_db() -> None:
     with _conn() as c:
         c.executescript(SCHEMA)
+        # Migration for older DBs created before paraphrases existed.
+        try:
+            c.execute("ALTER TABLE kb_entries ADD COLUMN paraphrases TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 # --- KB ingest -------------------------------------------------------------
@@ -191,35 +201,16 @@ def save_uploaded_kb(file_bytes: bytes, filename: str) -> Path:
 
 # --- KB read ---------------------------------------------------------------
 
-def get_all_entries() -> list[KBEntry]:
-    init_db()
-    with _conn() as c:
-        rows = c.execute(
-            "SELECT row_id, issue_id, title, category, description, resolution_steps "
-            "FROM kb_entries ORDER BY row_id"
-        ).fetchall()
-    return [
-        KBEntry(
-            row_id=r["row_id"],
-            issue_id=r["issue_id"] or "",
-            title=r["title"] or "",
-            category=r["category"] or "",
-            description=r["description"] or "",
-            resolution_steps=r["resolution_steps"] or "",
-        )
-        for r in rows
-    ]
-
-
-def get_entry(row_id: int) -> Optional[KBEntry]:
-    with _conn() as c:
-        r = c.execute(
-            "SELECT row_id, issue_id, title, category, description, resolution_steps "
-            "FROM kb_entries WHERE row_id = ?",
-            (row_id,),
-        ).fetchone()
-    if r is None:
-        return None
+def _row_to_entry(r) -> KBEntry:
+    raw = r["paraphrases"] if "paraphrases" in r.keys() else None
+    paraphrases: list[str] = []
+    if raw:
+        try:
+            loaded = json.loads(raw)
+            if isinstance(loaded, list):
+                paraphrases = [str(p) for p in loaded]
+        except (json.JSONDecodeError, TypeError):
+            paraphrases = []
     return KBEntry(
         row_id=r["row_id"],
         issue_id=r["issue_id"] or "",
@@ -227,7 +218,56 @@ def get_entry(row_id: int) -> Optional[KBEntry]:
         category=r["category"] or "",
         description=r["description"] or "",
         resolution_steps=r["resolution_steps"] or "",
+        paraphrases=paraphrases,
     )
+
+
+def get_all_entries() -> list[KBEntry]:
+    init_db()
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT row_id, issue_id, title, category, description, "
+            "resolution_steps, paraphrases "
+            "FROM kb_entries ORDER BY row_id"
+        ).fetchall()
+    return [_row_to_entry(r) for r in rows]
+
+
+def get_entry(row_id: int) -> Optional[KBEntry]:
+    with _conn() as c:
+        r = c.execute(
+            "SELECT row_id, issue_id, title, category, description, "
+            "resolution_steps, paraphrases "
+            "FROM kb_entries WHERE row_id = ?",
+            (row_id,),
+        ).fetchone()
+    if r is None:
+        return None
+    return _row_to_entry(r)
+
+
+def entries_missing_paraphrases() -> list[KBEntry]:
+    """Return entries that don't have paraphrases yet (empty or NULL)."""
+    init_db()
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT row_id, issue_id, title, category, description, "
+            "resolution_steps, paraphrases "
+            "FROM kb_entries "
+            "WHERE paraphrases IS NULL OR paraphrases = '' OR paraphrases = '[]' "
+            "ORDER BY row_id"
+        ).fetchall()
+    return [_row_to_entry(r) for r in rows]
+
+
+def set_paraphrases(row_id: int, paraphrases: list[str]) -> None:
+    """Save the LLM-generated paraphrases for one KB row."""
+    init_db()
+    with _conn() as c:
+        c.execute(
+            "UPDATE kb_entries SET paraphrases = ? WHERE row_id = ?",
+            (json.dumps(paraphrases, ensure_ascii=False), row_id),
+        )
 
 
 def get_last_updated() -> Optional[str]:
