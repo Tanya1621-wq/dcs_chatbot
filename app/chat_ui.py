@@ -124,6 +124,28 @@ def _render_admin(searcher) -> None:
 
     st.divider()
 
+    st.markdown("**Download knowledge base**")
+    if kb_service.kb_count() > 0:
+        col_csv, col_xlsx = st.columns(2)
+        col_csv.download_button(
+            "⬇️ CSV",
+            data=kb_service.export_kb_csv(),
+            file_name="knowledge_base.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        col_xlsx.download_button(
+            "⬇️ Excel",
+            data=kb_service.export_kb_xlsx(),
+            file_name="knowledge_base.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    else:
+        st.caption("KB is empty — nothing to download.")
+
+    st.divider()
+
     upload = st.file_uploader(
         "Upload knowledge base (.xlsx or .csv)",
         type=["xlsx", "csv"],

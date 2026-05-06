@@ -1,4 +1,8 @@
-"""Hybrid retrieval: semantic (FAISS) + fuzzy (rapidfuzz), weighted blend.
+"""Hybrid retrieval: semantic (FAISS) + fuzzy (rapidfuzz) + cross-encoder rerank.
+
+Two-stage pipeline:
+  1. Hybrid bi-encoder + fuzzy → wide pool of candidates (fast).
+  2. Cross-encoder reranker → precise ranking of the top-K pool (accurate).
 
 The chatbot calls `HybridSearcher.search(query)`; if confidence is below
 the configured threshold the caller should fall back to Groq.
@@ -9,11 +13,12 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
-from services import fuzzy_service, kb_service
+from services import fuzzy_service, kb_service, rerank_service
 from services.embedding_service import FaissIndex
 from utils.config import (
     CONFIDENCE_THRESHOLD,
     FUZZY_WEIGHT,
+    RERANK_TOP_K,
     SEMANTIC_WEIGHT,
     TOP_K,
 )
@@ -28,6 +33,8 @@ class SearchResult:
     semantic: float
     fuzzy: float
     score: float
+    hybrid: float = 0.0   # raw hybrid score before rerank (for transparency)
+    rerank: float = 0.0   # cross-encoder score; 0.0 if reranker not used
 
     @property
     def confidence(self) -> float:
@@ -90,17 +97,18 @@ class HybridSearcher:
 
         query_norm = _preprocess(query)
 
-        # Semantic
-        sem_pairs = self._index.search(query_norm, top_k=max(top_k * 4, 10))
+        # --- Stage 1: hybrid retrieval (bi-encoder + fuzzy) -----------------
+        # Pull a wide pool so the reranker has enough material to work with.
+        sem_pool = max(RERANK_TOP_K, top_k * 4, 10)
+        sem_pairs = self._index.search(query_norm, top_k=sem_pool)
         sem_scores: dict[int, float] = {row_id: s for row_id, s in sem_pairs}
 
-        # Fuzzy (over the full KB — cheap for thousands of entries)
         fuz_scores = fuzzy_service.score_all(query_norm, self._entries)
 
-        # Blend
         candidate_ids = set(sem_scores) | {
             rid for rid, s in fuz_scores.items() if s >= 0.5
         }
+
         results: list[SearchResult] = []
         for rid in candidate_ids:
             entry = self._by_id.get(rid)
@@ -108,10 +116,34 @@ class HybridSearcher:
                 continue
             sem = sem_scores.get(rid, 0.0)
             fuz = fuz_scores.get(rid, 0.0)
-            score = SEMANTIC_WEIGHT * sem + FUZZY_WEIGHT * fuz
-            results.append(SearchResult(entry=entry, semantic=sem, fuzzy=fuz, score=score))
+            hybrid = SEMANTIC_WEIGHT * sem + FUZZY_WEIGHT * fuz
+            results.append(
+                SearchResult(
+                    entry=entry,
+                    semantic=sem,
+                    fuzzy=fuz,
+                    hybrid=hybrid,
+                    rerank=0.0,
+                    score=hybrid,
+                )
+            )
 
-        results.sort(key=lambda r: r.score, reverse=True)
+        results.sort(key=lambda r: r.hybrid, reverse=True)
+
+        # --- Stage 2: cross-encoder rerank on the top-K pool ----------------
+        if rerank_service.is_available() and results:
+            pool = results[:RERANK_TOP_K]
+            pairs = [(r.entry.row_id, r.entry.search_text()) for r in pool]
+            rerank_scores = rerank_service.rerank(query_norm, pairs)
+            if rerank_scores:
+                for r in pool:
+                    r.rerank = rerank_scores.get(r.entry.row_id, 0.0)
+                    # Cross-encoder is more accurate — promote it to the
+                    # authoritative ranking signal.
+                    r.score = r.rerank
+                pool.sort(key=lambda r: r.score, reverse=True)
+                return pool[:top_k]
+
         return results[:top_k]
 
     @staticmethod

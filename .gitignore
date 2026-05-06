@@ -7,3 +7,4 @@ db/*.db
 data/vector_store/*
 !data/vector_store/.gitkeep
 .streamlit/secrets.toml
+.claude/

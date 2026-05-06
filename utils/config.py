@@ -53,6 +53,17 @@ FUZZY_WEIGHT = _get_float("FUZZY_WEIGHT", 0.3)
 CONFIDENCE_THRESHOLD = _get_float("CONFIDENCE_THRESHOLD", 0.45)
 TOP_K = 3
 
+# --- Reranker (second-stage cross-encoder) ---
+RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "true").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+RERANKER_MODEL_NAME = os.getenv(
+    "RERANKER_MODEL_NAME",
+    "BAAI/bge-reranker-v2-m3",
+)
+# How many top hybrid candidates to send to the reranker.
+RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "15"))
+
 # Expected KB column names (case-insensitive on load).
 KB_COLUMNS = [
     "issue_id",

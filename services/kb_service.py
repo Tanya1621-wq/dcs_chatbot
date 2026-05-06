@@ -270,6 +270,51 @@ def set_paraphrases(row_id: int, paraphrases: list[str]) -> None:
         )
 
 
+# --- KB export -------------------------------------------------------------
+
+def export_kb_dataframe() -> pd.DataFrame:
+    """Return the KB as a DataFrame with CSV-compatible column names.
+
+    The downloaded file can be re-uploaded as-is via the admin panel; the
+    extra `paraphrases` column is preserved for round-tripping but is
+    ignored by the upload path.
+    """
+    entries = get_all_entries()
+    rows = [
+        {
+            "issue_id": e.issue_id,
+            "issue_title": e.title,
+            "issue_category": e.category,
+            "issue_description": e.description,
+            "resolution_steps": e.resolution_steps,
+            "paraphrases": (
+                json.dumps(e.paraphrases, ensure_ascii=False) if e.paraphrases else ""
+            ),
+        }
+        for e in entries
+    ]
+    return pd.DataFrame(rows, columns=[
+        "issue_id", "issue_title", "issue_category",
+        "issue_description", "resolution_steps", "paraphrases",
+    ])
+
+
+def export_kb_csv() -> bytes:
+    """Return the KB as UTF-8 encoded CSV bytes."""
+    return export_kb_dataframe().to_csv(index=False).encode("utf-8-sig")
+
+
+def export_kb_xlsx() -> bytes:
+    """Return the KB as XLSX bytes (single sheet 'knowledge_base')."""
+    import io
+
+    df = export_kb_dataframe()
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="knowledge_base")
+    return buf.getvalue()
+
+
 def get_last_updated() -> Optional[str]:
     with _conn() as c:
         r = c.execute("SELECT value FROM meta WHERE key='last_updated'").fetchone()
