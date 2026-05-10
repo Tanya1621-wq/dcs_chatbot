@@ -42,7 +42,7 @@ def _result_card(result: SearchResult) -> None:
         st.markdown(f"**Issue:** {e.description}")
     st.markdown("**Resolution steps:**")
     st.markdown(e.resolution_steps)
-    st.progress(min(max(result.score, 0.0), 1.0), text=f"Confidence: {result.score:.0%}")
+    # st.progress(min(max(result.score, 0.0), 1.0), text=f"Confidence: {result.score:.0%}")
 
 
 def _chat_history_for_groq() -> list[dict]:

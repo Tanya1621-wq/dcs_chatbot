@@ -15,7 +15,7 @@ def fuzzy_score(query: str, title: str, category: str) -> float:
     title_score = fuzz.token_set_ratio(query, title or "") / 100.0
     cat_score = fuzz.token_set_ratio(query, category or "") / 100.0
     # Title is the dominant signal; category nudges ties.
-    return 0.8 * title_score + 0.2 * cat_score
+    return 0.95 * title_score + 0.05 * cat_score
 
 
 def score_all(query: str, entries) -> dict[int, float]:

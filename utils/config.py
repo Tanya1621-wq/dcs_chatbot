@@ -50,8 +50,8 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 # --- Retrieval tuning ---
 SEMANTIC_WEIGHT = _get_float("SEMANTIC_WEIGHT", 0.7)
 FUZZY_WEIGHT = _get_float("FUZZY_WEIGHT", 0.3)
-CONFIDENCE_THRESHOLD = _get_float("CONFIDENCE_THRESHOLD", 0.45)
-TOP_K = 3
+CONFIDENCE_THRESHOLD = _get_float("CONFIDENCE_THRESHOLD", 0.6)
+TOP_K = 1
 
 # --- Reranker (second-stage cross-encoder) ---
 RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "true").strip().lower() in (
@@ -62,7 +62,7 @@ RERANKER_MODEL_NAME = os.getenv(
     "BAAI/bge-reranker-v2-m3",
 )
 # How many top hybrid candidates to send to the reranker.
-RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "15"))
+RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "7"))
 
 # Expected KB column names (case-insensitive on load).
 KB_COLUMNS = [
